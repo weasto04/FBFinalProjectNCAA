@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WNCAA Finals Analytics</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 18px; }
+    .chart { margin-bottom: 36px; }
+    .controls { margin-bottom: 8px; }
+    .tooltip { position: absolute; pointer-events: none; background: rgba(0,0,0,0.85); color: #fff; padding: 8px; border-radius: 4px; font-size: 13px; }
+    .sidebar { border-left: 1px solid #ddd; padding-left: 12px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      /* sticky: stays next to the dominance chart and doesn't push other content when it overflows */
+      position: -webkit-sticky; position: sticky; top: 110px; align-self: flex-start; width: 420px; max-height: calc(100vh - 130px); overflow: auto; }
+    @media (max-width: 1000px) {
+      .sidebar { position: static; width: auto; box-shadow: none; max-height: none; overflow: visible; }
+      .flex { flex-direction: column; }
+    }
+    .flex { display:flex; gap:18px; }
+    svg { background: #fff; }
+    .bar { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>WNCAA Finals — Analytics</h1>
+
+  <div class="chart" id="goal-diff-chart">
+    <h2>Goal Differential in NCAA Championship Over the Years</h2>
+    <div class="controls">
+      Decade: <select id="gd-decade"><option value="all">All</option></select>
+    </div>
+    <div id="gd-svg"></div>
+  </div>
+
+  <div class="flex">
+    <div class="chart" id="dominance-chart" style="flex:1">
+      <h2>Program Dominance in NCAA Championship</h2>
+      <div class="controls">Top N teams: <select id="topn">
+        <option>1</option>
+        <option>2</option>
+        <option>3</option>
+        <option>4</option>
+        <option>5</option>
+        <option>6</option>
+        <option>7</option>
+        <option>8</option>
+        <option>9</option>
+        <option selected>10</option>
+      </select></div>
+      <div id="dom-svg"></div>
+    </div>
+    <div class="chart sidebar" style="width:420px">
+      <h2>Program Details</h2>
+      <div id="team-details"><p>Click a team bar to see in-depth finals information here.</p></div>
+    </div>
+  </div>
+
+  <div class="chart" id="total-goals-chart">
+    <h2>Total Goals Scored in NCAA Championship Over the Years</h2>
+    <div class="controls">
+      Decade: <select id="tg-decade"><option value="all">All</option></select>
+      Filter: <select id="tg-filter"><option value="all">All</option><option value="close">Close (≤3)</option><option value="blowout">Blowouts (≥7)</option><option value="dynasty">Dynasties (3+ titles)</option></select>
+    </div>
+    <div id="tg-svg"></div>
+  </div>
+
+  <div id="tooltip" class="tooltip" style="display:none"></div>
+
+  <script>
+  // Load analytics.json then build charts
+  fetch('analytics.json').then(r=>r.json()).then(data=>{
+    const marginOver = data.margin_over_time.map(d=>({
+      year: +d.year,
+      goal_diff: d.goal_diff===null?null:+d.goal_diff,
+      champion_goals: d.champion_goals===null?null:+d.champion_goals,
+      runnerup_goals: d.runnerup_goals===null?null:+d.runnerup_goals,
+      total_goals: d.total_goals===null?null:+d.total_goals,
+      location: d.location,
+      champion: d.champion,
+      runner_up: d.runner_up
+    })).filter(d=>d.year);
+
+    const titles = data.titles_per_team.map(d=>({team:d.champion_name,titles:+d.titles}));
+    const avg = data.avg_margin_per_champion.map(d=>({team:d.champion_name,avg:+(d.avg_margin||0)}));
+
+    // Build decade lists
+    const decades = Array.from(new Set(marginOver.map(d=>Math.floor(d.year/10)*10))).sort((a,b)=>a-b);
+    const decadeSelects = ['gd-decade','tg-decade'];
+    decadeSelects.forEach(id=>{
+      const sel = document.getElementById(id);
+      sel.innerHTML = '<option value="all">All</option>' + decades.map(dc=>`<option value="${dc}">${dc}s</option>`).join('');
+    });
+
+    // Tooltip
+    const tooltip = d3.select('#tooltip');
+
+    // Goal diff chart
+    const gdW = 900, gdH = 260, pad = {l:50,r:20,t:20,b:40};
+    const svgGD = d3.select('#gd-svg').append('svg').attr('width',gdW).attr('height',gdH);
+
+    function drawGoalDiff(decade='all'){
+      const set = (decade==='all')?marginOver:marginOver.filter(d=>Math.floor(d.year/10)*10==+decade);
+      // unique, sorted years in the selection
+      const uniqueYears = Array.from(new Set(set.map(d=>d.year))).sort((a,b)=>a-b);
+      if (uniqueYears.length === 0) {
+        svgGD.selectAll('*').remove();
+        svgGD.append('text').attr('x',gdW/2).attr('y',gdH/2).attr('text-anchor','middle').text('No data');
+        return;
+      }
+      const x = d3.scaleBand().domain(uniqueYears).range([pad.l,gdW-pad.r]).padding(0.3);
+      // compute y domain from available goal_diff values; provide a fallback
+      const gdVals = set.filter(d=>d.goal_diff!==null).map(d=>d.goal_diff);
+      const yDomain = gdVals.length? d3.extent(gdVals) : [0,1];
+      const y = d3.scaleLinear().domain(yDomain).nice().range([gdH-pad.b,pad.t]);
+      svgGD.selectAll('*').remove();
+      const xAxis = d3.axisBottom(x).tickFormat(d3.format('d'));
+      const yAxis = d3.axisLeft(y).ticks(6);
+      const xg = svgGD.append('g').attr('transform',`translate(0,${gdH-pad.b})`).call(xAxis);
+      svgGD.append('g').attr('transform',`translate(${pad.l},0)`).call(yAxis);
+      // Improve readability when many year ticks: rotate and selectively hide labels
+      const tickCount = uniqueYears.length;
+      if (tickCount > 8) {
+        xg.selectAll('text')
+          .style('font-size', '11px')
+          .attr('transform', 'rotate(-45)')
+          .attr('text-anchor', 'end')
+          .attr('dx', '-0.4em')
+          .attr('dy', '0.25em');
+      }
+      // If extremely crowded, hide every other tick label for clarity
+      if (tickCount > 20) {
+        xg.selectAll('.tick text').each(function(d,i){ if (i % 2 === 1) d3.select(this).style('display','none'); });
+      }
+      // line using band center
+      const line = d3.line().defined(d=>d.goal_diff!==null).x(d=>x(d.year) + x.bandwidth()/2).y(d=>y(d.goal_diff));
+      svgGD.append('path').datum(set).attr('fill','none').attr('stroke','#2b6cb0').attr('stroke-width',2).attr('d',line);
+      // points
+      svgGD.selectAll('circle').data(set.filter(d=>d.goal_diff!==null)).join('circle')
+        .attr('cx',d=>x(d.year) + x.bandwidth()/2).attr('cy',d=>y(d.goal_diff)).attr('r',5).attr('fill','#ff7f0e')
+        .on('mouseover', (event,d)=>{
+          const gd = d.goal_diff===null ? 'N/A' : d.goal_diff;
+          tooltip.style('display','block').html(`
+            <div style="font-weight:700;font-size:14px;margin-bottom:6px">${d.year}</div>
+            <div style="font-size:16px;font-weight:800;color:#2b6cb0;margin-bottom:6px">Goal diff: ${gd}</div>
+            <div style="margin-bottom:4px">${d.champion} vs ${d.runner_up}</div>
+            <div style="margin-bottom:4px">Score: ${d.champion_goals}-${d.runnerup_goals}</div>
+            <div style="opacity:0.85">Location: ${d.location.replace(/\n/g,' ')}</div>
+          `);
+        })
+        .on('mousemove', (event)=>{ tooltip.style('left',(event.pageX+12)+'px').style('top',(event.pageY+8)+'px'); })
+        .on('mouseout', ()=>tooltip.style('display','none'));
+    }
+    drawGoalDiff('all');
+    d3.select('#gd-decade').on('change',function(){ drawGoalDiff(this.value); });
+
+    // Program dominance bar chart (top N)
+    const domW = 700, domH = 360, domPad={l:120,r:20,t:20,b:50};
+    const svgDom = d3.select('#dom-svg').append('svg').attr('width',domW).attr('height',domH);
+    // Map team names to (approximate) school colors. Add more as needed.
+    const teamColors = {
+      'Maryland':'#A00000',
+      'Northwestern':'#4e2a84',
+      'North Carolina':'#7ec0ee',
+      'Virginia':'#FDB913',
+      'Princeton':'#FF8F00',
+      'Temple':'#CC0000',
+      'Penn State':'#001F5B',
+      'Boston College':'#880000',
+      'New Hampshire':'#0033A0',
+      'Massachusetts':'#007A33',
+      'James Madison':'#4B2E83',
+      'Harvard':'#A51C30',
+      'Delaware':'#0067B1',
+      'Penn':'#011F5B',
+      'Dartmouth':'#00693E'
+    };
+    function drawDominance(n=10){
+      const merged = titles.map(t=>{
+        const m = avg.find(a=>a.team===t.team)||{avg:0};
+        return {team:t.team,titles:+t.titles,avg: +m.avg};
+      }).sort((a,b)=>b.titles - a.titles).slice(0,n);
+      svgDom.selectAll('*').remove();
+      const x = d3.scaleLinear().domain([0,d3.max(merged,d=>d.titles)]).range([domPad.l,domW-domPad.r]);
+      const y = d3.scaleBand().domain(merged.map(d=>d.team)).range([domPad.t,domH-domPad.b]).padding(0.2);
+      svgDom.append('g').attr('transform',`translate(0,${domH-domPad.b})`).call(d3.axisBottom(x).ticks(5));
+      svgDom.append('g').attr('transform',`translate(${domPad.l},0)`).call(d3.axisLeft(y));
+      const avgExtent = d3.extent(merged,d=>d.avg);
+      const fallback = d3.scaleLinear().domain(avgExtent).range(['#fee8c8','#e34a33']);
+      svgDom.selectAll('.bar').data(merged).join('rect').attr('class','bar')
+        .attr('x',domPad.l).attr('y',d=>y(d.team)).attr('height',y.bandwidth()).attr('width',d=>x(d.titles)-domPad.l)
+        .attr('fill',d=>{
+          // try exact team match first
+          if (teamColors[d.team]) return teamColors[d.team];
+          // fallback: try prefix match (some names include counts like 'Maryland(13)')
+          const key = Object.keys(teamColors).find(k => d.team && d.team.indexOf(k) !== -1);
+          if (key) return teamColors[key];
+          return fallback(d.avg);
+        })
+        .attr('stroke','#222').attr('stroke-width',0.3)
+        .on('click', (event,d)=> showTeamFinals(d.team));
+    }
+    function showTeamFinals(team){
+      const finals = marginOver.filter(r=>r.champion && r.champion.indexOf(team)!==-1).sort((a,b)=>a.year-b.year);
+      const container = d3.select('#team-details');
+      container.html(`<h3>${team} — Finals</h3>` + (finals.length? '<ul>'+finals.map(f=>`<li>${f.year}: ${f.champion} ${f.champion_goals}-${f.runnerup_goals} ${f.runner_up} — ${f.location.replace(/\n/g,' ')}</li>`).join('') + '</ul>' : '<p>No finals found.</p>'));
+        // Content update in the team-details panel which is now scrollable
+    }
+    drawDominance(+document.getElementById('topn').value);
+    d3.select('#topn').on('change', ()=> drawDominance(+document.getElementById('topn').value));
+
+    // Total goals over time (match Goal Diff chart sizing)
+    const tgW = gdW, tgH = gdH, tgPad={l:50,r:20,t:20,b:40};
+    const svgTG = d3.select('#tg-svg').append('svg').attr('width',tgW).attr('height',tgH);
+    function drawTotalGoals(decade='all', filter='all'){
+      let set = (decade==='all')?marginOver:marginOver.filter(d=>Math.floor(d.year/10)*10==+decade);
+      if(filter==='close') set = set.filter(d=>d.goal_diff!==null && Math.abs(d.goal_diff) <=3);
+      if(filter==='blowout') set = set.filter(d=>d.goal_diff!==null && Math.abs(d.goal_diff) >=7);
+      if(filter==='dynasty'){
+        const dyn = titles.filter(t=>t.titles>=3).map(t=>t.team);
+        set = set.filter(d=>dyn.some(tt=>d.champion && d.champion.indexOf(tt)!==-1));
+      }
+
+      // handle empty set
+      if (!set || set.length === 0) {
+        svgTG.selectAll('*').remove();
+        svgTG.append('text').attr('x', tgW/2).attr('y', tgH/2).attr('text-anchor','middle').text('No data for selection');
+        return;
+      }
+
+      // discrete years for clear ticks
+      const years = Array.from(new Set(set.map(d=>d.year))).sort((a,b)=>a-b);
+      const x = d3.scaleBand().domain(years).range([tgPad.l,tgW-tgPad.r]).padding(0.3);
+      const maxTotal = d3.max(set, d=>d.total_goals) || 10;
+      const y = d3.scaleLinear().domain([0, maxTotal]).nice().range([tgH-tgPad.b,tgPad.t]);
+
+      svgTG.selectAll('*').remove();
+      const xg = svgTG.append('g').attr('transform',`translate(0,${tgH-tgPad.b})`).call(d3.axisBottom(x).tickFormat(d3.format('d')));
+      svgTG.append('g').attr('transform',`translate(${tgPad.l},0)`).call(d3.axisLeft(y));
+      // Improve readability when many year ticks: rotate and selectively hide labels (same behavior as goal-diff)
+      const tickCountTG = years.length;
+      if (tickCountTG > 8) {
+        xg.selectAll('text')
+          .style('font-size', '11px')
+          .attr('transform', 'rotate(-45)')
+          .attr('text-anchor', 'end')
+          .attr('dx', '-0.4em')
+          .attr('dy', '0.25em');
+      }
+      if (tickCountTG > 20) {
+        xg.selectAll('.tick text').each(function(d,i){ if (i % 2 === 1) d3.select(this).style('display','none'); });
+      }
+
+      const line = d3.line().defined(d=>d.total_goals!==null).x(d=>x(d.year) + x.bandwidth()/2).y(d=>y(d.total_goals));
+      svgTG.append('path').datum(set).attr('fill','none').attr('stroke','#2ca02c').attr('stroke-width',2).attr('d',line);
+
+      // points with interactive tooltip
+      svgTG.selectAll('circle').data(set.filter(d=>d.total_goals!==null)).join('circle')
+        .attr('cx',d=>x(d.year) + x.bandwidth()/2).attr('cy',d=>y(d.total_goals)).attr('r',5).attr('fill','#2ca02c')
+        .on('mouseover',(event,d)=>{
+          tooltip.style('display','block').html(`<strong>${d.year}</strong><br/>${d.champion} vs ${d.runner_up}<br/>Score: ${d.champion_goals}-${d.runnerup_goals}<br/>Total goals: ${d.total_goals}<br/>Margin: ${d.goal_diff}<br/>Location: ${d.location.replace(/\n/g,' ')}`);
+        })
+        .on('mousemove',(event)=>{ tooltip.style('left',(event.pageX+12)+'px').style('top',(event.pageY+8)+'px'); })
+        .on('mouseout',()=>tooltip.style('display','none'));
+
+      // small summary stat
+      const avg = d3.mean(set, d=>d.total_goals);
+      svgTG.append('text').attr('x', tgW - tgPad.r - 6).attr('y', tgPad.t + 12).attr('text-anchor','end').attr('fill','#333').style('font-size','12px').text(`Avg goals: ${avg?avg.toFixed(1):'N/A'}`);
+    }
+    drawTotalGoals('all','all');
+    d3.select('#tg-decade').on('change', ()=> drawTotalGoals(d3.select('#tg-decade').node().value, d3.select('#tg-filter').node().value));
+    d3.select('#tg-filter').on('change', ()=> drawTotalGoals(d3.select('#tg-decade').node().value, d3.select('#tg-filter').node().value));
+
+  }).catch(err=>{ console.error('Failed to load analytics.json',err); d3.select('body').append('pre').text('Failed to load analytics.json'); });
+  </script>
+</body>
+</html>
