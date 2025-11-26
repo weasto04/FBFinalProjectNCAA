@@ -3,16 +3,22 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>WNCAA Finals Analytics</title>
+  <title>Womens Lacrosse NCAA Division 1 Championship Analytics</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
-    body { font-family: system-ui, Arial, sans-serif; margin: 18px; }
+    body { font-family: system-ui, Arial, sans-serif; margin: 18px; padding-top: 72px; }
     .chart { margin-bottom: 36px; }
     .controls { margin-bottom: 8px; }
     .tooltip { position: absolute; pointer-events: none; background: rgba(0,0,0,0.85); color: #fff; padding: 8px; border-radius: 4px; font-size: 13px; }
     .sidebar { border-left: 1px solid #ddd; padding-left: 12px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
       /* sticky: stays next to the dominance chart and doesn't push other content when it overflows */
       position: -webkit-sticky; position: sticky; top: 110px; align-self: flex-start; width: 420px; max-height: calc(100vh - 130px); overflow: auto; }
+    .top-nav { position: fixed; top: 0; left: 0; right: 0; background: #fff; z-index: 1000; box-shadow: 0 1px 6px rgba(0,0,0,0.08); }
+    .top-nav .inner { max-width:1000px;margin:0 auto;display:flex;gap:12px;align-items:center;padding:8px 12px }
+    .top-nav a { color:#2b6cb0;text-decoration:none;font-weight:600;padding:6px 8px;border-radius:4px }
+    .top-nav a:hover { background:#f0f8ff }
+    /* prevent sticky header from covering targets when scrolling */
+    #report-section, #provenance, #database, #about-app, #goal-diff-chart { scroll-margin-top: 92px; }
     @media (max-width: 1000px) {
       .sidebar { position: static; width: auto; box-shadow: none; max-height: none; overflow: visible; }
       .flex { flex-direction: column; }
@@ -23,7 +29,178 @@
   </style>
 </head>
 <body>
-  <h1>WNCAA Finals — Analytics</h1>
+  <header style="display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;margin-bottom:12px;gap:8px">
+    <div>
+      <h1 style="margin:0">Womens Lacrosse NCAA Division 1 Championship Analytics</h1>
+      <div style="color:#666;font-size:13px">Whitley Easton | CIS-105 | Final Project</div>
+    </div>
+
+    <nav class="top-nav" aria-label="Section navigation">
+      <div class="inner">
+        <a class="nav-link" href="#report-section">Project Objective</a>
+        <a class="nav-link" href="#provenance">Web Scraping</a>
+        <a class="nav-link" href="#database">Database</a>
+        <a class="nav-link" href="#about-app">About My App</a>
+        <a class="nav-link" href="#goal-diff-chart">Visuals</a>
+      </div>
+    </nav>
+  </header>
+
+  <!-- Report section (landing) -->
+  <section id="report-section" style="margin-bottom:20px">
+    <div style="background:#fff;border:1px solid #eee;padding:18px;border-radius:8px;max-width:1000px">
+      <h2 style="margin-top:0">Project Objective</h2>
+      <p style="margin:0 0 8px">This project analyzes how goal differential relates to success in the NCAA Division I Women’s Lacrosse Championship, using data scraped from every title game since the tournament began in 1982. My goal was to study both the big-picture evolution of the championship game itself and the dominance patterns of the programs that repeatedly appear in the finals.</p>
+      <h3 style="margin-top:12px">Key Insights / What I hope to communicate</h3>
+      <ul style="margin-top:8px;padding-left:18px">
+        <li>Show how goal differentials in NCAA championship games have changed over time.</li>
+        <li>Highlight shifts in scoring tempo and overall offensive output in finals.</li>
+        <li>Identify which programs dominate the championship stage and how decisively they win.</li>
+        <li>Compare dynasties by linking title counts with average margins of victory.</li>
+        <li>Use interactive visuals to help users explore eras, trends, and team histories.</li>
+      </ul>
+    </div>
+    
+    <!-- Web Scraping -->
+    <section id="provenance" style="margin-top:14px">
+      <h3 style="margin-bottom:6px">Web Scraping</h3>
+      <div style="background:#fafafa;border:1px solid #eee;padding:12px;border-radius:6px;max-width:1000px;color:#222">
+        <p style="margin:6px 0"><strong>Source URL:</strong> <a href="https://en.wikipedia.org/wiki/NCAA_Division_I_women%27s_lacrosse_tournament" target="_blank">https://en.wikipedia.org/wiki/NCAA_Division_I_women%27s_lacrosse_tournament</a></p>
+        <p style="margin:6px 0"><strong>Why this page:</strong> This Wikipedia page lists NCAA Division I women’s lacrosse tournament information from 1982–2025, including championship matchups, scores, and related metadata — which is exactly the structured historical data used for these visuals.</p>
+        <p style="margin:6px 0"><strong>Tools used:</strong> Python <code>requests</code>, <code>BeautifulSoup</code>, and the standard <code>csv</code> library to fetch and serialize the table data into <code>table.csv</code>.</p>
+
+        <div style="margin-top:8px">
+          <strong>Scraping code:</strong>
+          <pre style="background:#fff;border:1px solid #e6e6e6;padding:10px;overflow:auto;border-radius:4px;margin-top:8px"><code>import requests
+from bs4 import BeautifulSoup
+import csv
+
+url = "https://en.wikipedia.org/wiki/NCAA_Division_I_women%27s_lacrosse_tournament"
+headers = {"User-Agent": "Mozilla/5.0 (compatible; simple-scraper/1.0)"}
+response = requests.get(url, headers=headers)
+response.raise_for_status()
+soup = BeautifulSoup(response.text, "html.parser")
+tables = soup.find_all("table")
+table = tables[1]
+rows = table.find_all("tr")
+csv_rows = []
+for tr in rows:
+    cells = tr.find_all(["th", "td"])
+    csv_rows.append([cell.get_text(strip=True) for cell in cells])
+with open("table.csv", "w", newline="", encoding="utf-8") as f:
+    writer = csv.writer(f)
+    writer.writerows(csv_rows)
+print("Wrote", len(csv_rows), "rows to table.csv")</code></pre>
+        </div>
+
+        <div style="margin-top:8px">
+          <strong>AI Assistant prompts used:</strong>
+          <pre style="background:#fff;border:1px solid #e6e6e6;padding:10px;overflow:auto;border-radius:4px;margin-top:8px"><code>1st Prompt: I would like to get some information from a wikipedia page via webscraping using the requests library and beautiful soup. here is the url: 
+https://en.wikipedia.org/wiki/NCAA_Division_I_women%27s_lacrosse_tournament
+I have created a file called scrape.py where i want to build my script. Start by just fetching the page, I want you to do this as simple as possible and not overcomplicate it, don't use functions. Since this is wikipedia, we will need to use a user agent. 
+2nd Prompt: I want you to add code to use the 2nd table on this page (if using coding langauage it would be the index 1 table), it should be a length of 50 rows in this table, I want to save this table in a variable table. 
+3rd Prompt: I then want to create a csv file out of the information in this table, add to the script to help me do this</code></pre>
+        </div>
+      </div>
+    </section>
+
+  </section>
+
+  <!-- Database -->
+  <section id="database" style="margin-top:18px">
+    <div style="background:#fff;border:1px solid #eee;padding:18px;border-radius:8px;max-width:1000px">
+      <h3 style="margin-top:0">Database</h3>
+      <p style="margin:6px 0"><strong>Table:</strong> <code>ncaa_finals</code></p>
+      <p style="margin:6px 0">I created a single SQLite table named <code>ncaa_finals</code> to store the parsed championship-game rows. Main columns include:</p>
+      <ul style="margin-top:6px;padding-left:18px">
+        <li><code>year</code> (INTEGER) — championship year</li>
+        <li><code>champion</code> (TEXT) — winning program</li>
+        <li><code>runner_up</code> (TEXT) — losing program</li>
+        <li><code>raw_score</code> (TEXT) — original score string (e.g. "14–13(3OT)")</li>
+        <li><code>champion_goals</code> (INTEGER) — parsed goals for the champion</li>
+        <li><code>runnerup_goals</code> (INTEGER) — parsed goals for the runner-up</li>
+        <li><code>goal_diff</code> (INTEGER) — champ goals minus runner-up goals</li>
+        <li><code>total_goals</code> (INTEGER) — sum of both teams' goals</li>
+        <li><code>location</code> (TEXT) — site of the final when available</li>
+      </ul>
+
+      <p style="margin:8px 0">Below are a few sample SQL queries I used to extract and summarize the data for analytics generation:</p>
+
+      <div style="margin-top:8px">
+        <strong>Margin over time</strong>
+        <pre style="background:#f8f8f8;border:1px solid #e6e6e6;padding:10px;border-radius:4px;overflow:auto;margin-top:6px"><code>SELECT year, goal_diff
+FROM ncaa_finals
+ORDER BY year;</code></pre>
+      </div>
+
+      <div style="margin-top:10px">
+        <strong>Finals becoming closer by decade</strong>
+        <pre style="background:#f8f8f8;border:1px solid #e6e6e6;padding:10px;border-radius:4px;overflow:auto;margin-top:6px"><code>SELECT (year/10)*10 AS decade,
+       AVG(goal_diff) AS avg_margin
+FROM ncaa_finals
+GROUP BY decade
+ORDER BY decade;</code></pre>
+      </div>
+
+      <div style="margin-top:10px">
+        <strong>Highest scoring championship games</strong>
+        <pre style="background:#f8f8f8;border:1px solid #e6e6e6;padding:10px;border-radius:4px;overflow:auto;margin-top:6px"><code>SELECT *
+FROM ncaa_finals
+ORDER BY total_goals DESC
+LIMIT 10;</code></pre>
+      </div>
+
+      <p style="margin:8px 0">Using these and a few other queries, I generated an analytics.csv that contains metric rows such as titles_per_team, avg_margin_per_champion, margin_over_time, highest_scoring_games, and decade_closeness. I then converted that CSV into analytics.json which the web app loads for the visualizations.</p>
+    </div>
+  </section>
+  
+    <!-- About My App -->
+    <section id="about-app" style="margin-top:18px">
+      <div style="background:#fff;border:1px solid #eee;padding:18px;border-radius:8px;max-width:1000px;color:#222">
+        <h3 style="margin-top:0">About My App</h3>
+        <p>This web app lets you explore trends from every NCAA Division I Women’s Lacrosse Championship game since 1982. All data comes from my web-scraped and SQL-processed dataset, and the charts update instantly based on your selections.</p>
+
+        <ol>
+          <li>
+            <strong>Goal Differential Over Time</strong>
+            <p>This chart shows how close or lopsided each championship game was.</p>
+            <p>Use the Decade dropdown to focus on a specific era.</p>
+            <p>Hover over any point to see the year, champion, runner-up, and final score.</p>
+          </li>
+          <li>
+            <strong>Program Dominance</strong>
+            <p>This section highlights which programs have won the most championships.</p>
+            <p>Use the Top N dropdown to choose how many teams to display.</p>
+            <p>Click any bar to pull up that team’s full championship history in the details panel on the right.</p>
+          </li>
+          <li>
+            <strong>Total Goals Over Time</strong>
+            <p>This chart illustrates how scoring in championship games has evolved.</p>
+            <p>Filter by decade or scoring level.</p>
+            <p>Hover over points to view total goals and the matchup for each year.</p>
+          </li>
+        </ol>
+
+        <h4>Behind the Scenes</h4>
+        <p>The visualizations are powered by JavaScript, which:</p>
+        <ul>
+          <li>Loads the cleaned CSV files generated through SQL</li>
+          <li>Filters the data based on your selections</li>
+          <li>Re-renders the charts dynamically without refreshing the page</li>
+        </ul>
+
+        <h4>How You Should Use It</h4>
+        <p>Interact with the dropdowns and click on programs to explore:</p>
+        <ul>
+          <li>How competitive championship games have been</li>
+          <li>Which teams dominate the NCAA tournament</li>
+          <li>How scoring trends have changed across four decades</li>
+        </ul>
+        <p>This gives you a clear, interactive way to understand both historical trends and program-level dominance in NCAA women’s lacrosse.</p>
+      </div>
+    </section>
+
+  </section>
 
   <div class="chart" id="goal-diff-chart">
     <h2>Goal Differential in NCAA Championship Over the Years</h2>
@@ -272,6 +449,17 @@
     d3.select('#tg-filter').on('change', ()=> drawTotalGoals(d3.select('#tg-decade').node().value, d3.select('#tg-filter').node().value));
 
   }).catch(err=>{ console.error('Failed to load analytics.json',err); d3.select('body').append('pre').text('Failed to load analytics.json'); });
+  </script>
+  <script>
+    // Smooth scroll for header nav links
+    document.querySelectorAll('a.nav-link').forEach(a=>{
+      a.addEventListener('click', function(e){
+        e.preventDefault();
+        const href = this.getAttribute('href');
+        const target = document.querySelector(href);
+        if(target) target.scrollIntoView({behavior:'smooth', block:'start'});
+      });
+    });
   </script>
 </body>
 </html>
